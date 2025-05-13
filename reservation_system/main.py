@@ -275,7 +275,6 @@ class ClassroomReservationSystem:
         dialog.geometry("400x250")
         dialog.resizable(False, False)
         
-        # 메인 윈도우 중심 계산
         main_win_x = self.root.winfo_x()
         main_win_y = self.root.winfo_y()
         main_win_width = self.root.winfo_width()
@@ -289,17 +288,14 @@ class ClassroomReservationSystem:
         main_frame = ttk.Frame(dialog, padding=(25, 15, 15, 15))
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # 현재 선택된 건물 가져오기
         current_building = self.building_var.get()
         if ":" in current_building:
             current_building_name = current_building.split(":")[1].strip()
         else:
             current_building_name = list(self.building_dict.keys())[0] if self.building_dict else ""
 
-        # 건물 목록 생성
         buildings = list(self.building_dict.keys())
         
-        # 입력 필드 그리드 설정
         entries = {}
         row = 0
         
@@ -328,11 +324,9 @@ class ClassroomReservationSystem:
         entries['date'] = date_entry
         row += 1
 
-        # 시간 선택기
         time_frame = ttk.Frame(main_frame)
         time_frame.grid(row=row, column=0, columnspan=2, pady=8, sticky='ew')
         
-        # 시작 시간
         ttk.Label(time_frame, text="시작 시간").pack(side=tk.LEFT, padx=(0,5))
         start_hour = ttk.Combobox(time_frame, width=3, values=[f"{i:02d}" for i in range(24)], state='readonly')
         start_hour.current(9)
@@ -342,7 +336,6 @@ class ClassroomReservationSystem:
         start_min.current(0)
         start_min.pack(side=tk.LEFT)
         
-        # 종료 시간
         ttk.Label(time_frame, text="   종료 시간").pack(side=tk.LEFT, padx=(15,5))
         end_hour = ttk.Combobox(time_frame, width=3, values=[f"{i:02d}" for i in range(24)], state='readonly')
         end_hour.current(18)
@@ -353,7 +346,6 @@ class ClassroomReservationSystem:
         end_min.pack(side=tk.LEFT)
         row += 1
 
-        # 확인 버튼
         btn_frame = ttk.Frame(main_frame)
         btn_frame.grid(row=row, column=0, columnspan=2, pady=12)
         
@@ -410,22 +402,42 @@ class ClassroomReservationSystem:
             response.raise_for_status()
             latest = response.json()
             
-            if 'tag_name' not in latest:
-                raise ValueError("GitHub 응답 형식 오류")
+            current_version = self.current_version
+            latest_tag = latest.get("tag_name", "").strip()
+            
+            version_match = re.search(r'(\d+\.\d+\.\d+)', latest_tag)
+            if not version_match:
+                raise ValueError("GitHub 태그 형식 오류")
                 
-            latest_tag = latest.get("tag_name", "")
-            latest_version = latest_tag.replace("reservation_system-", "").strip()
-
-            if latest_version > self.current_version:
-                if messagebox.askyesno("업데이트 확인", f"새 버전 {latest_version}이 있습니다.\n업데이트 페이지로 이동하시겠습니까?"):
+            latest_version = version_match.group(1)
+            
+            def version_to_tuple(ver):
+                return tuple(map(int, ver.split('.')))
+            
+            current_tuple = version_to_tuple(current_version)
+            latest_tuple = version_to_tuple(latest_version)
+            
+            if latest_tuple > current_tuple:
+                response = messagebox.askyesno(
+                    "업데이트 확인",
+                    f"새 버전 {latest_version}이 출시되었습니다!\n\n"
+                    f"현재 버전: {current_version}\n"
+                    f"최신 버전: {latest_version}\n\n"
+                    "업데이트 페이지로 이동하시겠습니까?"
+                )
+                if response:
                     webbrowser.open(self.repo_url)
             else:
-                messagebox.showinfo("업데이트 확인", "현재 최신 버전을 사용 중입니다.")
-
-        except requests.exceptions.RequestException as re:
-            messagebox.showerror("연결 오류", f"업데이트 서버 연결 실패: {str(re)}")
+                messagebox.showinfo(
+                    "업데이트 확인",
+                    f"현재 최신 버전을 사용 중입니다.\n\n"
+                    f"현재 버전: {current_version}"
+                )
+                
+        except requests.exceptions.RequestException as req_err:
+            messagebox.showerror("연결 오류", f"서버 연결 실패: {str(re)}")
         except Exception as e:
-            messagebox.showerror("처리 오류", f"업데이트 확인 중 오류: {str(e)}")
+            messagebox.showerror("오류 발생", f"업데이트 확인 실패: {str(e)}")
 
 if __name__ == "__main__":
     root = tk.Tk()
