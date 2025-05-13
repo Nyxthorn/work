@@ -18,7 +18,7 @@ class ClassroomReservationSystem:
         self.root.minsize(1000, 600)
         self.root.configure(bg='#fff5f9')
 
-        self.current_version = "1.1.0"
+        self.current_version = "1.1.2"
         self.repo_url = "https://github.com/Nyxthorn/work/releases"
 
         self.website_data = []
