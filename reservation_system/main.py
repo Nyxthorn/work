@@ -18,7 +18,7 @@ class ClassroomReservationSystem:
         self.root.minsize(1000, 600)
         self.root.configure(bg='#fff5f9')
 
-        self.current_version = "1.1.3"
+        self.current_version = "1.1.4"
         self.repo_url = "https://github.com/Nyxthorn/work/releases"
 
         self.website_data = []
@@ -32,6 +32,10 @@ class ClassroomReservationSystem:
             self.load_initial_data()
         else:
             messagebox.showerror("초기화 오류", "건물 목록을 불러올 수 없습니다. 인터넷 연결을 확인해주세요.")
+
+    def clean_building_name(self, name):
+        """건물 이름에서 앞의 숫자와 공백 제거"""
+        return re.sub(r'^\d+\s*', '', name).strip()
 
     def setup_style(self):
         style = ttk.Style()
@@ -91,7 +95,7 @@ class ClassroomReservationSystem:
         ttk.Label(control_frame, text="건물:").pack(side=tk.LEFT, padx=10)
         self.building_var = tk.StringVar()
         self.building_combo = ttk.Combobox(control_frame, textvariable=self.building_var)
-        self.building_combo['values'] = [f"{code}:{name}" for code, name in self.buildings]
+        self.building_combo['values'] = [name for code, name in self.buildings]
         self.building_combo.pack(side=tk.LEFT, padx=5)
         self.building_combo.bind('<<ComboboxSelected>>', lambda e: self.refresh_data())
 
@@ -123,9 +127,11 @@ class ClassroomReservationSystem:
             url = "https://kutis1.kyungnam.ac.kr/ADFF/AE/AE0561M.aspx"
             response = requests.get(url, verify=False)
             soup = BeautifulSoup(response.text, 'html.parser')
-            return [(opt['value'], opt.text.strip()) 
-                    for opt in soup.select('#slct_arg_bldg_cd option') 
-                    if opt['value'] != '%']
+            return [
+                (opt['value'], self.clean_building_name(opt.text.strip()))
+                for opt in soup.select('#slct_arg_bldg_cd option') 
+                if opt['value'] != '%'
+            ]
         except Exception as e:
             messagebox.showerror("오류", f"건물 목록 조회 실패: {str(e)}")
             return []
@@ -244,7 +250,10 @@ class ClassroomReservationSystem:
 
     def refresh_data(self):
         if self.building_var.get():
-            code = self.building_var.get().split(':')[0]
+            selected_index = self.building_combo.current()
+            if selected_index == -1:
+                return
+            code = self.buildings[selected_index][0]
             self.website_data = self.scrape_website_data(code)
             self.update_display()
 
@@ -289,12 +298,7 @@ class ClassroomReservationSystem:
         main_frame.pack(fill=tk.BOTH, expand=True)
 
         current_building = self.building_var.get()
-        if ":" in current_building:
-            current_building_name = current_building.split(":")[1].strip()
-        else:
-            current_building_name = list(self.building_dict.keys())[0] if self.building_dict else ""
-
-        buildings = list(self.building_dict.keys())
+        buildings = [name for code, name in self.buildings]
         
         entries = {}
         row = 0
@@ -304,8 +308,8 @@ class ClassroomReservationSystem:
         
         ttk.Label(main_frame, text="건물").grid(row=row, column=0, padx=5, pady=3, sticky='w')
         building_cb = ttk.Combobox(main_frame, values=buildings, state='readonly')
-        if current_building_name in buildings:
-            building_cb.current(buildings.index(current_building_name))
+        if current_building in buildings:
+            building_cb.current(buildings.index(current_building))
         else:
             building_cb.current(0)
         building_cb.grid(row=row, column=1, padx=5, pady=3, sticky='ew')
@@ -364,7 +368,8 @@ class ClassroomReservationSystem:
             if not re.match(r'^\d+$', self.parse_room_number(room)):
                 raise ValueError("강의실 번호가 유효하지 않습니다")
 
-            code = self.building_dict.get(building)
+            # 건물 이름으로 코드 조회
+            code = next((code for code, name in self.buildings if name == building), None)
             if not code:
                 raise ValueError("유효하지 않은 건물 선택입니다")
                 
