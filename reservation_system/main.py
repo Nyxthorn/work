@@ -13,20 +13,64 @@ warnings.filterwarnings('ignore', category=requests.packages.urllib3.exceptions.
 class ClassroomReservationSystem:
     def __init__(self, root):
         self.root = root
-        self.root.title("강의실 예약 관리 시스템")
+        self.root.title("🌈 강의실 예약 관리 시스템")
         self.root.geometry("1200x800")
         self.root.minsize(1000, 600)
+        self.root.configure(bg='#fff5f9')
 
-        self.current_version = "1.0.0"
+        self.current_version = "1.1.0"
         self.repo_url = "https://github.com/Nyxthorn/work/releases"
 
         self.website_data = []
         self.manual_data = []
         self.buildings = self.get_building_list()
-        self.building_dict = {name: code for code, name in self.buildings}
+        self.building_dict = {name: code for code, name in self.buildings} if self.buildings else {}
 
+        self.setup_style()
         self.setup_ui()
-        self.load_initial_data()
+        if self.buildings:
+            self.load_initial_data()
+        else:
+            messagebox.showerror("초기화 오류", "건물 목록을 불러올 수 없습니다. 인터넷 연결을 확인해주세요.")
+
+    def setup_style(self):
+        style = ttk.Style()
+        style.theme_use('clam')
+
+        style.configure('.', background='#fff5f9', foreground='#333333')
+        style.configure('TFrame', background='#fff5f9')
+        style.configure('TLabel', background='#fff5f9', font=('나눔바른고딕', 9))
+        style.configure('TButton', 
+                       font=('나눔바른고딕', 10, 'bold'),
+                       padding=8,
+                       relief="flat",
+                       background="#ffd1dc",
+                       foreground="#4a4a4a",
+                       borderwidth=0)
+        
+        style.map("TButton",
+                 background=[('active', '#ffb3c6')],
+                 relief=[('pressed', 'sunken')])
+
+        style.configure("Treeview",
+                       font=('나눔바른고딕', 9),
+                       rowheight=36,
+                       background="#fff0f7",
+                       fieldbackground="#fff0f7",
+                       borderwidth=0)
+        style.configure("Treeview.Heading",
+                       font=('나눔바른고딕', 10, 'bold'),
+                       background="#ffd1dc",
+                       foreground="#4a4a4a",
+                       relief="flat")
+        style.map("Treeview",
+                 background=[('selected', '#ffb3c6')],
+                 foreground=[('selected', '#000')])
+        
+        style.configure("Treeview.EvenRow", background="#fff0f7")
+        style.configure("Treeview.OddRow", background="#ffe6f2")
+        style.configure("TCombobox", fieldbackground="#ffffff", background="#ffffff", arrowsize=12)
+        style.configure("TEntry", fieldbackground="#ffffff")
 
     def get_building_name(self, code):
         return next((name for c, name in self.buildings if c == code), "알 수 없음")
@@ -55,10 +99,9 @@ class ClassroomReservationSystem:
         btn_frame.pack(side=tk.RIGHT, padx=10)
         ttk.Button(btn_frame, text="새로고침", command=self.refresh_data).pack(side=tk.LEFT, padx=2)
         ttk.Button(btn_frame, text="사용 가능 조회", command=self.open_check_dialog).pack(side=tk.LEFT, padx=2)
-        ttk.Button(btn_frame, text="삭제", command=self.delete_entry).pack(side=tk.LEFT, padx=2)
         ttk.Button(btn_frame, text="업데이트 확인", command=self.check_for_update).pack(side=tk.LEFT, padx=2)
 
-        columns = ('source', 'building', 'room', 'time', 'person', 'status', 'conflict')
+        columns = ('source', 'building', 'room', 'time', 'person', 'status')
         self.tree = ttk.Treeview(main_frame, columns=columns, show='headings', selectmode='browse')
 
         for col, text, width, anchor in [
@@ -68,14 +111,12 @@ class ClassroomReservationSystem:
             ('time', '사용시간', 250, 'w'),
             ('person', '신청자', 150, 'w'),
             ('status', '상태', 80, 'center'),
-            ('conflict', '충돌', 60, 'center')
         ]:
             self.tree.heading(col, text=text, anchor=anchor)
-            self.tree.column(col, width=width, anchor=anchor)
+            self.tree.column(col, width=width, anchor=anchor, stretch=True)
 
-        self.tree.pack(fill=tk.BOTH, expand=True)
-        self.tree.tag_configure('conflict', background='#ffdddd')
-        self.tree.tag_configure('invalid', background='#ffaaaa')
+        ttk.Separator(main_frame, orient='horizontal').pack(fill='x', pady=5)
+        self.tree.pack(fill=tk.BOTH, expand=True, pady=10, padx=10)
 
     def get_building_list(self):
         try:
@@ -157,11 +198,12 @@ class ClassroomReservationSystem:
             if len(parts) >= 5:
                 return datetime(*map(int, parts[:5]))
             elif len(parts) == 3:
-                return datetime(*map(int, parts[:3]))
+                today = datetime.today()
+                return datetime(today.year, today.month, today.day, *map(int, parts[:3]))
             else:
-                raise ValueError
+                raise ValueError(f"잘못된 시간 형식: {time_str}")
         except Exception as e:
-            raise ValueError(f"시간 파싱 오류: {time_str}")
+            raise ValueError(f"시간 파싱 오류: {time_str} - {str(e)}")
 
     def check_conflicts(self):
         time_dict = {}
@@ -185,16 +227,13 @@ class ClassroomReservationSystem:
         self.tree.delete(*self.tree.get_children())
         all_entries = sorted(self.website_data + self.manual_data, key=lambda x: x['start'])
 
-        for entry in all_entries:
-            tags = ['conflict'] if entry['conflict'] else []
-            if entry['conflict'] and entry['source'] == '수동입력':
-                tags.append('invalid')
-
+        for idx, entry in enumerate(all_entries):
+            tags = ('EvenRow',) if idx % 2 == 0 else ('OddRow',)
             time_str = f"{entry['start'].strftime('%Y.%m.%d %H:%M')} ~ {entry['end'].strftime('%H:%M')}"
             self.tree.insert('', 'end', values=(
                 entry['source'], entry['building'], entry['room'], time_str,
-                entry['person'], entry['status'], '⚠️' if entry['conflict'] else ''
-            ), tags=tuple(tags))
+                entry['person'], entry['status']
+            ), tags=tags)
 
     def is_conflict(self, new_entry):
         for entry in self.website_data + self.manual_data:
@@ -231,79 +270,149 @@ class ClassroomReservationSystem:
 
     def open_check_dialog(self):
         dialog = tk.Toplevel(self.root)
-        dialog.title("사용 가능 시간 확인")
-        dialog.grab_set()
+        dialog.title("🕒 사용 가능 시간 확인")
+        dialog.configure(bg='#fff5f9')
+        dialog.geometry("400x250")
+        dialog.resizable(False, False)
+        
+        # 메인 윈도우 중심 계산
+        main_win_x = self.root.winfo_x()
+        main_win_y = self.root.winfo_y()
+        main_win_width = self.root.winfo_width()
+        main_win_height = self.root.winfo_height()
+        dialog_width = 400
+        dialog_height = 250
+        x = main_win_x + (main_win_width // 2) - (dialog_width // 2)
+        y = main_win_y + (main_win_height // 2) - (dialog_height // 2)
+        dialog.geometry(f"+{x}+{y}")
+        
+        main_frame = ttk.Frame(dialog, padding=(25, 15, 15, 15))
+        main_frame.pack(fill=tk.BOTH, expand=True)
 
+        # 현재 선택된 건물 가져오기
+        current_building = self.building_var.get()
+        if ":" in current_building:
+            current_building_name = current_building.split(":")[1].strip()
+        else:
+            current_building_name = list(self.building_dict.keys())[0] if self.building_dict else ""
+
+        # 건물 목록 생성
+        buildings = list(self.building_dict.keys())
+        
+        # 입력 필드 그리드 설정
         entries = {}
-
-        ttk.Label(dialog, text="건물").grid(row=0, column=0, padx=5, pady=2)
-        building_names = [name for _, name in self.buildings]
-        building_cb = ttk.Combobox(dialog, values=building_names, state='readonly')
-        building_cb.current(0)
-        building_cb.grid(row=0, column=1, padx=5, pady=2)
+        row = 0
+        
+        ttk.Label(main_frame, text="").grid(row=row, column=0, pady=5)
+        row += 1
+        
+        ttk.Label(main_frame, text="건물").grid(row=row, column=0, padx=5, pady=3, sticky='w')
+        building_cb = ttk.Combobox(main_frame, values=buildings, state='readonly')
+        if current_building_name in buildings:
+            building_cb.current(buildings.index(current_building_name))
+        else:
+            building_cb.current(0)
+        building_cb.grid(row=row, column=1, padx=5, pady=3, sticky='ew')
         entries['building'] = building_cb
+        row += 1
 
-        ttk.Label(dialog, text="강의실").grid(row=1, column=0, padx=5, pady=2)
-        room_entry = ttk.Entry(dialog)
-        room_entry.grid(row=1, column=1, padx=5, pady=2)
+        ttk.Label(main_frame, text="강의실").grid(row=row, column=0, padx=5, pady=3, sticky='w')
+        room_entry = ttk.Entry(main_frame)
+        room_entry.grid(row=row, column=1, padx=5, pady=3, sticky='ew')
         entries['room'] = room_entry
+        row += 1
 
-        ttk.Label(dialog, text="날짜").grid(row=2, column=0, padx=5, pady=2)
-        date_entry = DateEntry(dialog, date_pattern='yyyy-mm-dd')
-        date_entry.grid(row=2, column=1, padx=5, pady=2)
+        ttk.Label(main_frame, text="날짜").grid(row=row, column=0, padx=5, pady=3, sticky='w')
+        date_entry = DateEntry(main_frame, date_pattern='yyyy-mm-dd')
+        date_entry.grid(row=row, column=1, padx=5, pady=3, sticky='ew')
         entries['date'] = date_entry
+        row += 1
 
-        def create_time_selector(row, label_text, key_prefix):
-            ttk.Label(dialog, text=label_text).grid(row=row, column=0, padx=5, pady=2)
-            hour_cb = ttk.Combobox(dialog, width=5, values=[f"{i:02d}" for i in range(24)], state='readonly')
-            min_cb = ttk.Combobox(dialog, width=5, values=[f"{i:02d}" for i in range(0, 60, 5)], state='readonly')
-            hour_cb.current(0)
-            min_cb.current(0)
-            hour_cb.grid(row=row, column=1, sticky='w', padx=(5, 0))
-            min_cb.grid(row=row, column=1, sticky='e', padx=(0, 5))
-            entries[f'{key_prefix}_hour'] = hour_cb
-            entries[f'{key_prefix}_min'] = min_cb
+        # 시간 선택기
+        time_frame = ttk.Frame(main_frame)
+        time_frame.grid(row=row, column=0, columnspan=2, pady=8, sticky='ew')
+        
+        # 시작 시간
+        ttk.Label(time_frame, text="시작 시간").pack(side=tk.LEFT, padx=(0,5))
+        start_hour = ttk.Combobox(time_frame, width=3, values=[f"{i:02d}" for i in range(24)], state='readonly')
+        start_hour.current(9)
+        start_hour.pack(side=tk.LEFT)
+        ttk.Label(time_frame, text=":").pack(side=tk.LEFT, padx=1)
+        start_min = ttk.Combobox(time_frame, width=3, values=[f"{i:02d}" for i in range(0, 60, 5)], state='readonly')
+        start_min.current(0)
+        start_min.pack(side=tk.LEFT)
+        
+        # 종료 시간
+        ttk.Label(time_frame, text="   종료 시간").pack(side=tk.LEFT, padx=(15,5))
+        end_hour = ttk.Combobox(time_frame, width=3, values=[f"{i:02d}" for i in range(24)], state='readonly')
+        end_hour.current(18)
+        end_hour.pack(side=tk.LEFT)
+        ttk.Label(time_frame, text=":").pack(side=tk.LEFT, padx=1)
+        end_min = ttk.Combobox(time_frame, width=3, values=[f"{i:02d}" for i in range(0, 60, 5)], state='readonly')
+        end_min.current(0)
+        end_min.pack(side=tk.LEFT)
+        row += 1
 
-        create_time_selector(3, "시작 시간", "start")
-        create_time_selector(4, "종료 시간", "end")
+        # 확인 버튼
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.grid(row=row, column=0, columnspan=2, pady=12)
+        
+        def validate_and_check():
+            if not room_entry.get().strip():
+                messagebox.showwarning("입력 누락", "강의실 번호를 입력해주세요!", parent=dialog)
+                return
+            self.check_availability(dialog, building_cb.get(), room_entry.get(), 
+                                  date_entry.get(), start_hour.get(), start_min.get(),
+                                  end_hour.get(), end_min.get())
 
-        def check_availability():
-            try:
-                building = entries['building'].get()
-                code = self.building_dict.get(building)
-                room = self.parse_room_number(entries['room'].get())
-                date = entries['date'].get()
-                start_time_str = f"{date} {entries['start_hour'].get()}:{entries['start_min'].get()}"
-                end_time_str = f"{date} {entries['end_hour'].get()}:{entries['end_min'].get()}"
+        ttk.Button(btn_frame, text="사용 가능 확인", command=validate_and_check).pack(side=tk.LEFT, padx=5)
 
-                start_dt = self.parse_time(start_time_str)
-                end_dt = self.parse_time(end_time_str)
+    def check_availability(self, dialog, building, room, date, sh, sm, eh, em):
+        try:
+            if not re.match(r'^\d+$', self.parse_room_number(room)):
+                raise ValueError("강의실 번호가 유효하지 않습니다")
 
-                if start_dt >= end_dt:
-                    raise ValueError("종료 시간이 시작 시간보다 빠릅니다.")
+            code = self.building_dict.get(building)
+            if not code:
+                raise ValueError("유효하지 않은 건물 선택입니다")
+                
+            room = self.parse_room_number(room)
+            start_time_str = f"{date} {sh}:{sm}"
+            end_time_str = f"{date} {eh}:{em}"
 
-                check_entry = {
-                    'building': building,
-                    'room': room,
-                    'start': start_dt,
-                    'end': end_dt
-                }
+            start_dt = self.parse_time(start_time_str)
+            end_dt = self.parse_time(end_time_str)
 
-                if self.is_conflict(check_entry):
-                    messagebox.showwarning("사용 불가", "해당 시간에 이미 예약이 존재합니다.")
-                else:
-                    messagebox.showinfo("사용 가능", "해당 시간은 사용 가능합니다!")
+            if start_dt >= end_dt:
+                raise ValueError("종료 시간이 시작 시간보다 빠릅니다.")
 
-            except Exception as e:
-                messagebox.showerror("오류", str(e))
+            check_entry = {
+                'building': building,
+                'room': room,
+                'start': start_dt,
+                'end': end_dt
+            }
 
-        ttk.Button(dialog, text="사용 가능 확인", command=check_availability).grid(row=5, columnspan=2, pady=10)
+            if self.is_conflict(check_entry):
+                messagebox.showwarning("사용 불가", "해당 시간에 이미 예약이 존재합니다.", parent=dialog)
+            else:
+                messagebox.showinfo("사용 가능", "해당 시간은 사용 가능합니다!", parent=dialog)
+
+        except ValueError as ve:
+            messagebox.showerror("입력 오류", str(ve), parent=dialog)
+        except Exception as e:
+            messagebox.showerror("시스템 오류", f"오류 발생: {str(e)}", parent=dialog)
 
     def check_for_update(self):
         try:
             api_url = "https://api.github.com/repos/Nyxthorn/work/releases/latest"
             response = requests.get(api_url, timeout=5)
+            response.raise_for_status()
             latest = response.json()
+            
+            if 'tag_name' not in latest:
+                raise ValueError("GitHub 응답 형식 오류")
+                
             latest_tag = latest.get("tag_name", "")
             latest_version = latest_tag.replace("reservation_system-", "").strip()
 
@@ -313,8 +422,10 @@ class ClassroomReservationSystem:
             else:
                 messagebox.showinfo("업데이트 확인", "현재 최신 버전을 사용 중입니다.")
 
+        except requests.exceptions.RequestException as re:
+            messagebox.showerror("연결 오류", f"업데이트 서버 연결 실패: {str(re)}")
         except Exception as e:
-            messagebox.showerror("업데이트 오류", f"업데이트 확인 실패:\n{str(e)}")
+            messagebox.showerror("처리 오류", f"업데이트 확인 중 오류: {str(e)}")
 
 if __name__ == "__main__":
     root = tk.Tk()
