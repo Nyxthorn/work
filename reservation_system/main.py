@@ -18,7 +18,7 @@ class ClassroomReservationSystem:
         self.root.minsize(1000, 600)
         self.root.configure(bg='#fff5f9')
 
-        self.current_version = "1.1.2"
+        self.current_version = "1.1.3"
         self.repo_url = latest.get('html_url')
 
         self.website_data = []
