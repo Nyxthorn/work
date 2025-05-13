@@ -19,7 +19,7 @@ class ClassroomReservationSystem:
         self.root.configure(bg='#fff5f9')
 
         self.current_version = "1.1.3"
-        self.repo_url = latest.get('html_url')
+        self.repo_url = "https://github.com/Nyxthorn/work/releases"
 
         self.website_data = []
         self.manual_data = []
@@ -395,50 +395,50 @@ class ClassroomReservationSystem:
         except Exception as e:
             messagebox.showerror("시스템 오류", f"오류 발생: {str(e)}", parent=dialog)
 
-def check_for_update(self):
-    try:
-        api_url = "https://api.github.com/repos/Nyxthorn/work/releases/latest"
-        response = requests.get(api_url, timeout=5)
-        response.raise_for_status()
-        latest = response.json()
-        
-        current_version = self.current_version
-        latest_tag = latest.get("tag_name", "").strip()
-        
-        version_match = re.search(r'(\d+\.\d+\.\d+)', latest_tag)
-        if not version_match:
-            raise ValueError("GitHub 태그 형식 오류")
+    def check_for_update(self):
+        try:
+            api_url = "https://api.github.com/repos/Nyxthorn/work/releases/latest"
+            response = requests.get(api_url, timeout=5)
+            response.raise_for_status()
+            latest = response.json()
             
-        latest_version = version_match.group(1)
-        
-        def version_to_tuple(ver):
-            return tuple(map(int, ver.split('.')))
-        
-        current_tuple = version_to_tuple(current_version)
-        latest_tuple = version_to_tuple(latest_version)
-        
-        if latest_tuple > current_tuple:
-            release_url = latest.get('html_url', self.repo_url)
-            response = messagebox.askyesno(
-                "업데이트 확인",
-                f"새 버전 {latest_version}이 출시되었습니다!\n\n"
-                f"현재 버전: {current_version}\n"
-                f"최신 버전: {latest_version}\n\n"
-                "업데이트 페이지로 이동하시겠습니까?"
-            )
-            if response:
-                webbrowser.open(release_url)  
-        else:
-            messagebox.showinfo(
-                "업데이트 확인",
-                f"현재 최신 버전을 사용 중입니다.\n\n"
-                f"현재 버전: {current_version}"
-            )
+            current_version = self.current_version
+            latest_tag = latest.get("tag_name", "").strip()
             
-    except requests.exceptions.RequestException as req_err:
-        messagebox.showerror("연결 오류", f"서버 연결 실패: {str(req_err)}")
-    except Exception as e:
-        messagebox.showerror("오류 발생", f"업데이트 확인 실패: {str(e)}")
+            version_match = re.search(r'v?(\d+\.\d+\.\d+)', latest_tag)
+            if not version_match:
+                raise ValueError(f"GitHub 태그 형식 오류: '{latest_tag}'")
+                
+            latest_version = version_match.group(1)
+            
+            def version_to_tuple(ver):
+                return tuple(map(int, ver.split('.')))
+            
+            current_tuple = version_to_tuple(current_version)
+            latest_tuple = version_to_tuple(latest_version)
+            
+            if latest_tuple > current_tuple:
+                release_url = latest.get('html_url', self.repo_url)
+                response = messagebox.askyesno(
+                    "업데이트 확인",
+                    f"새 버전 {latest_version}이 출시되었습니다!\n\n"
+                    f"현재 버전: {current_version}\n"
+                    f"최신 버전: {latest_version}\n\n"
+                    "업데이트 페이지로 이동하시겠습니까?"
+                )
+                if response:
+                    webbrowser.open(release_url)
+            else:
+                messagebox.showinfo(
+                    "업데이트 확인",
+                    f"현재 최신 버전을 사용 중입니다.\n\n"
+                    f"현재 버전: {current_version}"
+                )
+                
+        except requests.exceptions.RequestException as req_err:
+            messagebox.showerror("연결 오류", f"서버 연결 실패: {str(req_err)}")
+        except Exception as e:
+            messagebox.showerror("오류 발생", f"업데이트 확인 실패: {str(e)}")
 
 if __name__ == "__main__":
     root = tk.Tk()
