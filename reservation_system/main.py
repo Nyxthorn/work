@@ -7,18 +7,68 @@ from tkcalendar import DateEntry
 import warnings
 import re
 import webbrowser
+from PIL import Image, ImageDraw, ImageTk
 
 warnings.filterwarnings('ignore', category=requests.packages.urllib3.exceptions.InsecureRequestWarning)
+
+class RoundedButton(tk.Canvas):
+    def __init__(self, parent, text, command, radius=20, bg='#ffd1dc', fg='#4a4a4a', **kwargs):
+        super().__init__(parent, highlightthickness=0, **kwargs)
+        self.command = command
+        self.radius = radius
+        self.bg = bg
+        self.fg = fg
+        self.hover_bg = '#ffb3c6'
+        self.text = text
+        self.width = kwargs.get('width', 100)
+        self.height = kwargs.get('height', 36)
+        self.bind("<Button-1>", self._on_click)
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
+        self.draw_normal()
+
+    def draw_normal(self):
+        self.delete("all")
+        img = Image.new("RGBA", (self.width, self.height), (0,0,0,0))
+        draw = ImageDraw.Draw(img)
+        draw.rounded_rectangle((0, 0, self.width-1, self.height-1), 
+                              radius=self.radius, fill=self.bg, outline=self.bg)
+        self.image = ImageTk.PhotoImage(img)
+        self.create_image(0,0, image=self.image, anchor='nw')
+        self.create_text(self.width/2, self.height/2, 
+                        text=self.text, fill=self.fg, 
+                        font=('나눔바른고딕', 10, 'bold'))
+
+    def draw_hover(self):
+        self.delete("all")
+        img = Image.new("RGBA", (self.width, self.height), (0,0,0,0))
+        draw = ImageDraw.Draw(img)
+        draw.rounded_rectangle((0, 0, self.width-1, self.height-1), 
+                              radius=self.radius, fill=self.hover_bg, outline=self.hover_bg)
+        self.image = ImageTk.PhotoImage(img)
+        self.create_image(0,0, image=self.image, anchor='nw')
+        self.create_text(self.width/2, self.height/2, 
+                        text=self.text, fill=self.fg, 
+                        font=('나눔바른고딕', 10, 'bold'))
+
+    def _on_click(self, event):
+        self.command()
+
+    def _on_enter(self, event):
+        self.draw_hover()
+
+    def _on_leave(self, event):
+        self.draw_normal()
 
 class ClassroomReservationSystem:
     def __init__(self, root):
         self.root = root
-        self.root.title("🌈 강의실 예약 관리 시스템")
+        self.root.title("강의실 예약 확인 시스템")
         self.root.geometry("1200x800")
         self.root.minsize(1000, 600)
         self.root.configure(bg='#fff5f9')
 
-        self.current_version = "1.1.4"
+        self.current_version = "1.1.5"
         self.repo_url = "https://github.com/Nyxthorn/work/releases"
 
         self.website_data = []
@@ -33,8 +83,12 @@ class ClassroomReservationSystem:
         else:
             messagebox.showerror("초기화 오류", "건물 목록을 불러올 수 없습니다. 인터넷 연결을 확인해주세요.")
 
+    def load_initial_data(self):
+        if self.buildings:
+            self.building_combo.current(0)
+            self.refresh_data()
+
     def clean_building_name(self, name):
-        """건물 이름에서 앞의 숫자와 공백 제거"""
         return re.sub(r'^\d+\s*', '', name).strip()
 
     def setup_style(self):
@@ -44,32 +98,21 @@ class ClassroomReservationSystem:
         style.configure('.', background='#fff5f9', foreground='#333333')
         style.configure('TFrame', background='#fff5f9')
         style.configure('TLabel', background='#fff5f9', font=('나눔바른고딕', 9))
-        style.configure('TButton', 
-                       font=('나눔바른고딕', 10, 'bold'),
-                       padding=8,
-                       relief="flat",
-                       background="#ffd1dc",
-                       foreground="#4a4a4a",
-                       borderwidth=0)
         
-        style.map("TButton",
-                 background=[('active', '#ffb3c6')],
-                 relief=[('pressed', 'sunken')])
-
         style.configure("Treeview",
-                       font=('나눔바른고딕', 9),
-                       rowheight=36,
-                       background="#fff0f7",
-                       fieldbackground="#fff0f7",
-                       borderwidth=0)
+                      font=('나눔바른고딕', 9),
+                      rowheight=36,
+                      background="#fff0f7",
+                      fieldbackground="#fff0f7",
+                      borderwidth=0)
         style.configure("Treeview.Heading",
-                       font=('나눔바른고딕', 10, 'bold'),
-                       background="#ffd1dc",
-                       foreground="#4a4a4a",
-                       relief="flat")
+                      font=('나눔바른고딕', 10, 'bold'),
+                      background="#ffd1dc",
+                      foreground="#4a4a4a",
+                      relief="flat")
         style.map("Treeview",
-                 background=[('selected', '#ffb3c6')],
-                 foreground=[('selected', '#000')])
+                background=[('selected', '#ffb3c6')],
+                foreground=[('selected', '#000')])
         
         style.configure("Treeview.EvenRow", background="#fff0f7")
         style.configure("Treeview.OddRow", background="#ffe6f2")
@@ -101,9 +144,21 @@ class ClassroomReservationSystem:
 
         btn_frame = ttk.Frame(control_frame)
         btn_frame.pack(side=tk.RIGHT, padx=10)
-        ttk.Button(btn_frame, text="새로고침", command=self.refresh_data).pack(side=tk.LEFT, padx=2)
-        ttk.Button(btn_frame, text="사용 가능 조회", command=self.open_check_dialog).pack(side=tk.LEFT, padx=2)
-        ttk.Button(btn_frame, text="업데이트 확인", command=self.check_for_update).pack(side=tk.LEFT, padx=2)
+        
+        self.refresh_btn = RoundedButton(btn_frame, text="새로고침", 
+                                       command=self.refresh_data, 
+                                       width=100, height=36)
+        self.refresh_btn.pack(side=tk.LEFT, padx=2)
+        
+        self.check_btn = RoundedButton(btn_frame, text="사용 가능 조회", 
+                                     command=self.open_check_dialog, 
+                                     width=120, height=36)
+        self.check_btn.pack(side=tk.LEFT, padx=2)
+        
+        self.update_btn = RoundedButton(btn_frame, text="업데이트 확인", 
+                                      command=self.check_for_update, 
+                                      width=120, height=36)
+        self.update_btn.pack(side=tk.LEFT, padx=2)
 
         columns = ('source', 'building', 'room', 'time', 'person', 'status')
         self.tree = ttk.Treeview(main_frame, columns=columns, show='headings', selectmode='browse')
@@ -135,11 +190,6 @@ class ClassroomReservationSystem:
         except Exception as e:
             messagebox.showerror("오류", f"건물 목록 조회 실패: {str(e)}")
             return []
-
-    def load_initial_data(self):
-        if self.buildings:
-            self.building_combo.current(0)
-            self.refresh_data()
 
     def parse_room_number(self, room_str):
         match = re.search(r'(\d+)(?!.*\d)', room_str)
@@ -361,14 +411,16 @@ class ClassroomReservationSystem:
                                   date_entry.get(), start_hour.get(), start_min.get(),
                                   end_hour.get(), end_min.get())
 
-        ttk.Button(btn_frame, text="사용 가능 확인", command=validate_and_check).pack(side=tk.LEFT, padx=5)
+        check_btn = RoundedButton(btn_frame, text="사용 가능 확인", 
+                                command=validate_and_check, 
+                                width=120, height=36)
+        check_btn.pack(side=tk.LEFT, padx=5)
 
     def check_availability(self, dialog, building, room, date, sh, sm, eh, em):
         try:
             if not re.match(r'^\d+$', self.parse_room_number(room)):
                 raise ValueError("강의실 번호가 유효하지 않습니다")
 
-            # 건물 이름으로 코드 조회
             code = next((code for code, name in self.buildings if name == building), None)
             if not code:
                 raise ValueError("유효하지 않은 건물 선택입니다")
