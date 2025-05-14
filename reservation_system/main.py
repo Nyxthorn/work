@@ -8,6 +8,9 @@ import warnings
 import re
 import webbrowser
 from PIL import Image, ImageDraw, ImageTk
+import asyncio
+from pyppeteer import launch
+import sys
 
 warnings.filterwarnings('ignore', category=requests.packages.urllib3.exceptions.InsecureRequestWarning)
 
@@ -63,12 +66,12 @@ class RoundedButton(tk.Canvas):
 class ClassroomReservationSystem:
     def __init__(self, root):
         self.root = root
-        self.root.title("강의실 예약 확인 시스템")
+        self.root.title("경남대학교 공간 관리 시스템")
         self.root.geometry("1200x800")
         self.root.minsize(1000, 600)
         self.root.configure(bg='#fff5f9')
 
-        self.current_version = "1.1.5"
+        self.current_version = "1.2.0"
         self.repo_url = "https://github.com/Nyxthorn/work/releases"
 
         self.website_data = []
@@ -78,6 +81,8 @@ class ClassroomReservationSystem:
 
         self.setup_style()
         self.setup_ui()
+        self.create_login_ui()
+        self.login_frame.pack_forget()
         if self.buildings:
             self.load_initial_data()
         else:
@@ -98,6 +103,7 @@ class ClassroomReservationSystem:
         style.configure('.', background='#fff5f9', foreground='#333333')
         style.configure('TFrame', background='#fff5f9')
         style.configure('TLabel', background='#fff5f9', font=('나눔바른고딕', 9))
+        style.configure('TEntry', fieldbackground='#ffffff')
         
         style.configure("Treeview",
                       font=('나눔바른고딕', 9),
@@ -117,7 +123,6 @@ class ClassroomReservationSystem:
         style.configure("Treeview.EvenRow", background="#fff0f7")
         style.configure("Treeview.OddRow", background="#ffe6f2")
         style.configure("TCombobox", fieldbackground="#ffffff", background="#ffffff", arrowsize=12)
-        style.configure("TEntry", fieldbackground="#ffffff")
 
     def get_building_name(self, code):
         return next((name for c, name in self.buildings if c == code), "알 수 없음")
@@ -144,6 +149,11 @@ class ClassroomReservationSystem:
 
         btn_frame = ttk.Frame(control_frame)
         btn_frame.pack(side=tk.RIGHT, padx=10)
+        
+        self.apply_btn = RoundedButton(btn_frame, text="공간사용신청", 
+                                     command=self.toggle_login_frame, 
+                                     width=120, height=36)
+        self.apply_btn.pack(side=tk.LEFT, padx=2)
         
         self.refresh_btn = RoundedButton(btn_frame, text="새로고침", 
                                        command=self.refresh_data, 
@@ -176,6 +186,103 @@ class ClassroomReservationSystem:
 
         ttk.Separator(main_frame, orient='horizontal').pack(fill='x', pady=5)
         self.tree.pack(fill=tk.BOTH, expand=True, pady=10, padx=10)
+
+    def toggle_login_frame(self):
+        if self.login_frame.winfo_ismapped():
+            self.login_frame.pack_forget()
+        else:
+            self.login_frame.pack(padx=10, pady=10)
+
+    def create_login_ui(self):
+        self.login_frame = ttk.Frame(self.root, style='TFrame')
+        
+        ttk.Label(self.login_frame, text="아이디").grid(row=0, column=0, padx=5, pady=5)
+        self.entry_id = ttk.Entry(self.login_frame)
+        self.entry_id.grid(row=0, column=1, padx=5, pady=5)
+
+        ttk.Label(self.login_frame, text="비밀번호").grid(row=1, column=0, padx=5, pady=5)
+        self.entry_pw = ttk.Entry(self.login_frame, show="*")
+        self.entry_pw.grid(row=1, column=1, padx=5, pady=5)
+
+        self.btn_login = RoundedButton(self.login_frame, text="로그인", 
+                                      command=self.login, 
+                                      width=80, height=30)
+        self.btn_login.grid(row=2, column=0, columnspan=2, pady=10)
+
+    async def async_login(self, user_id, user_pw):
+        try:
+            # 크롬 브라우저 경로 설정
+            chrome_path = {
+                'win': 'C:/Program Files/Google/Chrome/Application/chrome.exe',
+                'dar': '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+            }.get(sys.platform[:3], None)
+
+            if not chrome_path:
+                raise Exception("지원되지 않는 운영체제입니다.")
+
+            browser = await launch(
+                executablePath=chrome_path,
+                headless=False,
+                args=[
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--window-size=1280,720'
+                ],
+                autoClose=False
+            )
+            page = await browser.newPage()
+            await page.setViewport({'width': 1280, 'height': 720})
+
+            await page.goto('https://kutis1.kyungnam.ac.kr/ADFF/AE/AE_Login.aspx', {'waitUntil': 'networkidle2'})
+            
+            # 요소 선택 및 상호작용
+            await page.waitForSelector('#rdoUserType_1')
+            await page.click('#rdoUserType_1')
+            
+            await page.waitForSelector('#txtUserID')
+            await page.type('#txtUserID', user_id)
+            
+            await page.waitForSelector('#txtPassword')
+            await page.type('#txtPassword', user_pw)
+            
+            await page.waitForSelector('#ibtnLogin')
+            await asyncio.gather(
+                page.waitForNavigation(),
+                page.click('#ibtnLogin'),
+            )
+
+            current_url = page.url
+            await browser.close()
+            return current_url
+
+        except Exception as e:
+            if 'browser' in locals():
+                await browser.close()
+            raise e
+
+    def login(self):
+        user_id = self.entry_id.get()
+        user_pw = self.entry_pw.get()
+
+        if not user_id or not user_pw:
+            messagebox.showerror("오류", "아이디와 비밀번호를 입력하세요.")
+            return
+
+        async def run_login():
+            try:
+                url = await self.async_login(user_id, user_pw)
+                if 'AE0560M.aspx' in url:
+                    messagebox.showinfo("로그인 성공", "공간 사용 신청 페이지를 엽니다.")
+                    webbrowser.open(url)
+                    self.login_frame.pack_forget()
+                else:
+                    messagebox.showerror("로그인 실패", "인증 정보가 올바르지 않습니다.")
+            except Exception as e:
+                messagebox.showerror("오류 발생", f"로그인 처리 중 오류: {str(e)}")
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(run_login())
 
     def get_building_list(self):
         try:
@@ -500,4 +607,9 @@ class ClassroomReservationSystem:
 if __name__ == "__main__":
     root = tk.Tk()
     app = ClassroomReservationSystem(root)
+    
+    # Windows에서 asyncio 이벤트 루프 설정
+    if sys.platform == 'win32':
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    
     root.mainloop()
