@@ -77,7 +77,7 @@ class RoundedButton(tk.Canvas):
 class ClassroomReservationSystem:
     def __init__(self, root):
         self.root = root
-        self.root.title("강의실 예약 확인 시스템")
+        self.root.title("경남대학교 공간 관리 시스템")
         self.root.geometry("1200x800")
         self.root.minsize(1000, 600)
         self.root.configure(bg='#fff5f9')
