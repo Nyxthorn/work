@@ -10,7 +10,18 @@ import webbrowser
 from PIL import Image, ImageDraw, ImageTk
 import asyncio
 from pyppeteer import launch
+from pyppeteer_stealth import stealth
 import sys
+import os
+import platform
+import winreg
+import threading
+import nest_asyncio
+nest_asyncio.apply() 
+
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 
 warnings.filterwarnings('ignore', category=requests.packages.urllib3.exceptions.InsecureRequestWarning)
 
@@ -66,10 +77,14 @@ class RoundedButton(tk.Canvas):
 class ClassroomReservationSystem:
     def __init__(self, root):
         self.root = root
-        self.root.title("경남대학교 공간 관리 시스템")
+        self.root.title("강의실 예약 확인 시스템")
         self.root.geometry("1200x800")
         self.root.minsize(1000, 600)
         self.root.configure(bg='#fff5f9')
+        
+        self.loop = None
+        self.async_thread = None
+        self.stop_event = None  
 
         self.current_version = "1.2.0"
         self.repo_url = "https://github.com/Nyxthorn/work/releases"
@@ -87,6 +102,47 @@ class ClassroomReservationSystem:
             self.load_initial_data()
         else:
             messagebox.showerror("초기화 오류", "건물 목록을 불러올 수 없습니다. 인터넷 연결을 확인해주세요.")
+
+    def check_chrome_installed(self):
+        try:
+            if platform.system() == 'Windows':
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe")
+                path, _ = winreg.QueryValueEx(key, None)
+                winreg.CloseKey(key)
+                return os.path.exists(path)
+        except:
+            pass
+        
+        common_paths = [
+            os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+        ]
+        
+        for path in common_paths:
+            if os.path.exists(path):
+                return True
+        return False
+
+    def find_chrome_path(self):
+        try:
+            if platform.system() == 'Windows':
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe")
+                path, _ = winreg.QueryValueEx(key, None)
+                winreg.CloseKey(key)
+                if os.path.exists(path):
+                    return path
+        except:
+            pass
+        
+        common_paths = [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        ]
+        
+        for path in common_paths:
+            if os.path.exists(path):
+                return path
+        return None
 
     def load_initial_data(self):
         if self.buildings:
@@ -210,79 +266,106 @@ class ClassroomReservationSystem:
         self.btn_login.grid(row=2, column=0, columnspan=2, pady=10)
 
     async def async_login(self, user_id, user_pw):
+        browser = None
+        page = None
         try:
-            # 크롬 브라우저 경로 설정
-            chrome_path = {
-                'win': 'C:/Program Files/Google/Chrome/Application/chrome.exe',
-                'dar': '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-            }.get(sys.platform[:3], None)
-
+            chrome_path = self.find_chrome_path()
             if not chrome_path:
-                raise Exception("지원되지 않는 운영체제입니다.")
+                raise Exception("Chrome 브라우저를 찾을 수 없습니다.")
 
+            # 브라우저 실행 (사용자 수동 종료)
             browser = await launch(
                 executablePath=chrome_path,
                 headless=False,
+                handleSIGINT=False,
+                handleSIGTERM=False,
+                handleSIGHUP=False,
                 args=[
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
                     '--window-size=1280,720'
                 ],
+                ignoreHTTPSErrors=True,
                 autoClose=False
             )
+
             page = await browser.newPage()
             await page.setViewport({'width': 1280, 'height': 720})
+            await stealth(page)
 
-            await page.goto('https://kutis1.kyungnam.ac.kr/ADFF/AE/AE_Login.aspx', {'waitUntil': 'networkidle2'})
+            # 로그인 프로세스
+            await page.goto('https://kutis1.kyungnam.ac.kr/ADFF/AE/AE_Login.aspx', timeout=60000)
             
-            # 요소 선택 및 상호작용
-            await page.waitForSelector('#rdoUserType_1')
+            # 사용자 타입 선택
             await page.click('#rdoUserType_1')
             
-            await page.waitForSelector('#txtUserID')
-            await page.type('#txtUserID', user_id)
+            # 아이디, 비밀번호 박스 선택
+            await page.type('#txtUserID', user_id, delay=30)
+            await page.type('#txtPassword', user_pw, delay=30)
             
-            await page.waitForSelector('#txtPassword')
-            await page.type('#txtPassword', user_pw)
-            
-            await page.waitForSelector('#ibtnLogin')
+            # 네비게이션 대기
             await asyncio.gather(
-                page.waitForNavigation(),
-                page.click('#ibtnLogin'),
+                page.waitForNavigation({'waitUntil': 'networkidle2', 'timeout': 30000}),
+                page.click('#ibtnLogin')
             )
 
-            current_url = page.url
-            await browser.close()
-            return current_url
+            # 공간신청 페이지 이동
+            await page.goto(
+                'https://kutis1.kyungnam.ac.kr/ADFF/AE/AE0560M.aspx',
+                {'waitUntil': 'domcontentloaded', 'timeout': 30000}
+            )
+            
+            # 성공 알림
+            self.root.after(0, lambda: messagebox.showinfo("성공", "브라우저에서 신청을 진행해주세요"))
+            return True
 
         except Exception as e:
-            if 'browser' in locals():
-                await browser.close()
+            # 오류 발생 시 브라우저 스크린샷 저장
+            if page:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                await page.screenshot({'path': f'login_error_{timestamp}.png'})
             raise e
 
+    def start_async_loop(self):
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_forever()
+
+    def safe_gui_update(self, func, *args):
+        self.root.after(0, lambda: func(*args))
+
     def login(self):
+        if not self.check_chrome_installed():
+            response = messagebox.askyesno(
+                "Chrome 설치 필요",
+                "이 기능을 사용하려면 Google Chrome 브라우저가 필요합니다.\n"
+                "설치 페이지로 이동하시겠습니까?"
+            )
+            if response:
+                webbrowser.open("https://www.google.com/chrome/")
+            return
+
         user_id = self.entry_id.get()
         user_pw = self.entry_pw.get()
-
+    
         if not user_id or not user_pw:
             messagebox.showerror("오류", "아이디와 비밀번호를 입력하세요.")
             return
 
-        async def run_login():
+        async def async_task():
             try:
-                url = await self.async_login(user_id, user_pw)
-                if 'AE0560M.aspx' in url:
-                    messagebox.showinfo("로그인 성공", "공간 사용 신청 페이지를 엽니다.")
-                    webbrowser.open(url)
-                    self.login_frame.pack_forget()
-                else:
-                    messagebox.showerror("로그인 실패", "인증 정보가 올바르지 않습니다.")
+                await self.async_login(user_id, user_pw)
+                self.safe_gui_update(messagebox.showinfo, "성공", "브라우저에서 신청을 진행해주세요")
+                self.safe_gui_update(self.login_frame.pack_forget)
             except Exception as e:
-                messagebox.showerror("오류 발생", f"로그인 처리 중 오류: {str(e)}")
+                self.safe_gui_update(messagebox.showerror, "실패", str(e))
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(run_login())
+        def run_async():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(async_task())
+        import threading
+        threading.Thread(target=run_async, daemon=True).start()
 
     def get_building_list(self):
         try:
@@ -605,11 +688,23 @@ class ClassroomReservationSystem:
             messagebox.showerror("오류 발생", f"업데이트 확인 실패: {str(e)}")
 
 if __name__ == "__main__":
+    import nest_asyncio
+    nest_asyncio.apply()
     root = tk.Tk()
     app = ClassroomReservationSystem(root)
     
-    # Windows에서 asyncio 이벤트 루프 설정
     if sys.platform == 'win32':
-        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy()) 
+    # 이벤트 루프 초기화
+    #app.async_thread = threading.Thread(
+    #    target=app.start_async_loop, 
+    #    daemon=True
+    #)
+    #app.async_thread.start()
     
+    # 종료 이벤트 핸들링
+    def on_closing():
+        root.destroy()
+    
+    root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
