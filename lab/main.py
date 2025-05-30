@@ -193,7 +193,7 @@ class ClassroomReservationSystem:
                             rooms += [rooms[-1]] * (len(expanded_times) - len(rooms))
 
                     for time_code, room in zip(expanded_times, rooms):
-                        # 건물-호실 분리 로직 (정규식 사용)
+                        # 건물-호실 분리 로직
                         match = re.match(r"^([가-힣a-zA-Z]+?)\-?(\d+)$", room)
                         if match:
                             building_part, room_number = match.groups()
