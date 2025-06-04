@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import datetime, timedelta
 from tkcalendar import DateEntry
 import warnings
 import re
@@ -17,6 +17,8 @@ import platform
 import winreg
 import threading
 import nest_asyncio
+import xml.etree.ElementTree as ET
+
 nest_asyncio.apply() 
 
 if sys.platform == 'win32':
@@ -86,22 +88,237 @@ class ClassroomReservationSystem:
         self.async_thread = None
         self.stop_event = None  
 
-        self.current_version = "1.2.0"
+        self.current_version = "1.3.0"
         self.repo_url = "https://github.com/Nyxthorn/work/releases"
 
         self.website_data = []
         self.manual_data = []
+        self.lecture_data = []  # ★ XML 강의 데이터 저장
         self.buildings = self.get_building_list()
         self.building_dict = {name: code for code, name in self.buildings} if self.buildings else {}
+        self.building_code_map = self.create_building_code_map()  # ★ 건물 코드 매핑
 
         self.setup_style()
         self.setup_ui()
         self.create_login_ui()
         self.login_frame.pack_forget()
+        self.xml_url = "https://raw.githubusercontent.com/Nyxthorn/work/main/data.xml"  # XML 데이터 URL ★추가
+        self.load_xml_data()  # ★ XML 데이터 로드 추가
+        
         if self.buildings:
             self.load_initial_data()
         else:
             messagebox.showerror("초기화 오류", "건물 목록을 불러올 수 없습니다. 인터넷 연결을 확인해주세요.")
+
+    def create_building_code_map(self):
+        """XML 축약 건물 코드 매핑 생성"""
+        return {
+            # 기본 매핑 (축약 → 공식명)
+            '1공': '제1공학관', 
+            '4공': '제4공학관',
+            '5공': '제5공학관(제2자연관)',
+            '건': '건강과학관(제1자연관)',
+            '교': '교육관',
+            '경': '제1경영관(제1경상관)',
+            '문': '문무관',
+            '2경': '제2경영관(제2경상관)',
+            '창': '창조관',
+            '산': '산학협력관',
+            '디': '디자인관',
+            '법': '법정관',
+            '예': '예술관',
+            '고운': '고운관(인문관)',
+            '성훈': '성훈관(제3공학관)',
+            '국': '국제어학관(국제교육관)',
+            '한': '한마관',
+        
+            # 역매핑 추가 (공식명 → 축약)
+            '제1공학관': '1공',
+            '제4공학관': '4공',
+            '제5공학관(제2자연관)': '5공',
+            '건강과학관(제1자연관)': '건',
+            '교육관': '교',
+            '제1경영관(제1경상관)': '경',
+            '문무관': '문',
+            '제2경영관(제2경상관)': '2경',
+            '창조관': '창',
+            '산학협력관': '산',
+            '디자인관': '디',
+            '법정관': '법',
+            '예술관': '예',
+            '고운관(인문관)': '고운',
+            '성훈관(제3공학관)': '성훈',
+            '국제어학관(국제교육관)': '국',
+            '한마관': '한'
+        }
+
+
+    def load_xml_data(self, reference_date=None):
+        try:
+            response = requests.get(self.xml_url, verify=False, timeout=10)
+            root = ET.fromstring(response.content)
+            self.lecture_data.clear()
+
+            for lecture in root.findall('Lecture'):
+                name = lecture.find('Name').text.strip() if lecture.find('Name') is not None else "이름 없는 강의"
+                try:
+                    raw_times = lecture.find('Time').text.strip()
+                    raw_rooms = lecture.find('Room').text.strip()
+
+                    # 시간 코드 확장
+                    expanded_times = []
+                    for time_part in raw_times.split(','):
+                        time_part = time_part.strip()
+                        # 범위 처리 (예: 수1-3 → 수1,수2,수3)
+                        if '-' in time_part:
+                            day = time_part[0]
+                            start_end = time_part[1:].split('-')
+                            if len(start_end) == 2:
+                                start, end = start_end
+                                for i in range(int(start), int(end)+1):
+                                    expanded_times.append(f"{day}{i}")
+                        else:
+                            expanded_times.append(time_part)
+
+                    # 강의실 분할 및 표준화
+                    rooms = [r.strip() for r in raw_rooms.split(',') if r.strip()]
+                    if not rooms:
+                        continue
+
+                    # 시간 개수에 맞게 강의실 반복
+                    if len(rooms) < len(expanded_times):
+                        rooms *= len(expanded_times)
+
+                    for time_code, room_str in zip(expanded_times, rooms):
+                        alt_names = re.findall(r'\((.*?)\)', room_str)
+                        base_room = re.sub(r'\(.*?\)', '', room_str).strip()
+
+                        parts = base_room.split('-', 1)
+                        building_part = parts[0].strip()
+                        room_part = parts[1].strip() if len(parts) > 1 else building_part  # 강의실 생략 시 건물명 사용
+
+                        building = self.building_code_map.get(building_part, building_part)
+
+                        all_room_names = [room_part] + [alt.strip() for alt in alt_names if alt.strip()]
+
+                        time_ranges = self.parse_time_code(time_code, reference_date=reference_date)
+                        for start, end in time_ranges:
+                            for room_name in all_room_names:
+                                self.lecture_data.append({
+                                    'building': building,
+                                    'room': room_name,
+                                    'start': start,
+                                    'end': end,
+                                    'source': '수업',
+                                    'name': name
+                                })
+                        print(f"XML 강의 시간: {start} ~ {end}") # 추가
+
+                except Exception as e:
+                    print(f"🚫 강의 '{name}' 처리 실패: {str(e)}")
+                    continue
+        except Exception as e:
+            messagebox.showwarning("오류", f"XML 처리 실패: {str(e)}")
+
+    
+    def parse_time_code(self, time_code, reference_date=None, days_ahead=6):
+        """
+        숫자/문자 교시 통합 처리 파서
+        - reference_date: 기준 날짜 (예: 사용자가 선택한 날짜)
+        - weeks_ahead: 몇 주치 수업을 생성할지 (기본 26주 = 약 6개월)
+        """
+        try:
+            time_code = str(time_code).strip().upper()
+            if len(time_code) < 1:
+                return []
+
+            # 1. 요일 추출
+            day_char = time_code[0]
+            kor_to_eng = {'월':'M','화':'T','수':'W','목':'R','금':'F','토':'S','일':'U'}
+            if day_char not in kor_to_eng:
+                raise ValueError(f"잘못된 요일 코드: {time_code}")
+            day_num = kor_to_eng[day_char]
+            day_map = {'M':0, 'T':1, 'W':2, 'R':3, 'F':4, 'S':5, 'U':6}
+            target_weekday = day_map[day_num]
+
+            # 2. 기준 날짜 처리
+            base_date = reference_date or datetime.today()
+            #if reference_date:
+            #    base_date = reference_date
+            #else:
+            #    base_date = datetime.today()
+
+            # 3. 교시 추출
+            period_str = time_code[1:]
+            periods = []
+            for part in period_str.split(','):
+                part = part.strip()
+                if '-' in part:
+                    start, end = part.split('-', 1)
+                    current = start
+                    while True:
+                        periods.append(current)
+                        if current == end: break
+                        current = str(int(current)+1) if current.isdigit() else chr(ord(current)+1)
+                else:
+                    periods.append(part)
+    
+            # 4. 시간 계산 
+            time_ranges = []
+            for day_offset in range(-days_ahead, days_ahead +1):
+                current_date = base_date + timedelta(days=day_offset)
+                
+                if current_date.weekday() != target_weekday:
+                    continue
+                for period in periods:
+                    if period.isdigit():
+                        period_num = int(period)
+                        if not 1 <= period_num <= 14: continue
+                        start_time = current_date.replace(hour=9 + (period_num - 1), minute=0)
+                        end_time = start_time + timedelta(minutes=50)
+                    elif period.isalpha() and len(period) == 1:
+                        idx = ord(period.upper()) - ord('A')
+                        start_min = 540 + 90 * idx # 09:00 기준
+                        hours, mins = divmod(start_min, 60)
+                        start_time = current_date.replace(hour=hours, minute=mins)
+                        end_time = start_time + timedelta(minutes=75)
+                    else:
+                        continue
+                    time_ranges.append((start_time, end_time))
+                """for period in periods:
+                    if period.isdigit():
+                        period_num = int(period)
+                        if not 1 <= period_num <= 14: continue
+                        start_time = self.get_next_weekday(target_weekday, base_date) + timedelta(weeks=week)
+                        start_time = start_time.replace(hour=9 + (period_num - 1), minute=0)
+                        end_time = start_time + timedelta(minutes=50)
+                    elif period.isalpha() and len(period) == 1:
+                        period = period.upper()
+                        if not ('A' <= period <= 'I'): continue
+                        idx = ord(period) - ord('A')
+                        start_min = 540 + 105 * idx  # 09:00 기준
+                        hours, mins = divmod(start_min, 60)
+                        start_time = self.get_next_weekday(target_weekday, base_date) + timedelta(weeks=week)
+                        start_time = start_time.replace(hour=hours, minute=mins)
+                        end_time = start_time + timedelta(minutes=75)
+                    else:
+                        continue
+                    time_ranges.append((start_time, end_time))"""
+            return time_ranges
+        except Exception as e:
+            print(f"⚠️ 시간 코드 오류: {time_code} ({str(e)})")
+            return []
+
+    def get_next_weekday(self, target_weekday, from_date=None):
+        """지정된 날짜 기준으로 다음 주의 특정 요일 반환"""
+        if from_date is None:
+            from_date = datetime.today()
+        delta = (target_weekday - from_date.weekday() + 7) % 7
+        return (from_date + timedelta(days=delta)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    def is_time_overlap(self, entry1, entry2):
+        """두 시간 항목이 겹치는지 확인"""
+        return (entry1['start'] < entry2['end']) and (entry1['end'] > entry2['start'])
 
     def check_chrome_installed(self):
         try:
@@ -382,8 +599,9 @@ class ClassroomReservationSystem:
             return []
 
     def parse_room_number(self, room_str):
-        match = re.search(r'(\d+)(?!.*\d)', room_str)
-        return match.group(1) if match else room_str
+        # match = re.search(r'(\d+)(?!.*\d)', room_str)
+        # return match.group(1) if match else room_str
+        return re.sub(r'[^0-9]', '', room_str)
 
     def scrape_website_data(self, building_code):
         try:
@@ -481,21 +699,64 @@ class ClassroomReservationSystem:
                 entry['person'], entry['status']
             ), tags=tags)
 
-    def is_conflict(self, new_entry):
-        for entry in self.website_data + self.manual_data:
-            if entry['building'] == new_entry['building'] and entry['room'] == new_entry['room']:
-                if not (new_entry['end'] <= entry['start'] or new_entry['start'] >= entry['end']):
-                    return True
-        return False
 
+    def normalize_names(self, name):
+        # 괄호 내 이름까지 포함해 비교
+        names = [name.strip()]
+        matches = re.findall(r'\((.*?)\)', name)
+        names += [m.strip() for m in matches if m.strip()]
+        return [re.sub(r'[^0-9가-힣A-Za-z]', '', n) for n in names]
+
+    def is_conflict(self, new_entry):
+        """강화된 충돌 검사 로직"""
+        # 건물명 정규화
+        new_building = self.building_code_map.get(new_entry['building'], new_entry['building'])
+        new_room_names = self.normalize_names(new_entry['room'])
+
+        for entry in self.lecture_data + self.website_data + self.manual_data:
+            entry_building = self.building_code_map.get(entry['building'], entry['building'])
+            entry_room_names = self.normalize_names(entry['room'])
+
+            if entry_building != new_building:
+                continue
+
+            if not set(new_room_names) & set(entry_room_names):
+                continue
+            # 시간 비교
+            if self.is_time_overlap(entry, new_entry):
+                print(f"🚨 충돌 발견: {entry['source']} {entry['start']}~{entry['end']}")
+                return {
+                    'source': entry['source'],
+                    'name': entry.get('name', ''),
+                    'start': entry['start'],
+                    'end': entry['end']
+                }
+    
+        print("✅ 충돌 없음")
+        return False
+        
     def refresh_data(self):
-        if self.building_var.get():
-            selected_index = self.building_combo.current()
-            if selected_index == -1:
-                return
-            code = self.buildings[selected_index][0]
-            self.website_data = self.scrape_website_data(code)
-            self.update_display()
+        """새로고침 시 XML 데이터도 함께 갱신"""
+        try:
+            # 기존 데이터 초기화
+            self.website_data = []
+            self.manual_data = []
+            self.lecture_data = []
+
+            # 건물 목록 재로드
+            self.buildings = self.get_building_list()
+            self.building_dict = {name: code for code, name in self.buildings}
+
+            # 데이터 재로드
+            self.load_xml_data()
+            if self.building_var.get():
+                selected_index = self.building_combo.current()
+                code = self.buildings[selected_index][0]
+                self.website_data = self.scrape_website_data(code)
+                self.update_display()
+            messagebox.showinfo("새로고침 완료", "최신 데이터로 갱신되었습니다.")
+        except Exception as e:
+            messagebox.showerror("새로고침 오류", f"데이터 갱신 실패: {str(e)}")
 
     def delete_entry(self):
         selected = self.tree.selection()
@@ -615,6 +876,8 @@ class ClassroomReservationSystem:
             if not code:
                 raise ValueError("유효하지 않은 건물 선택입니다")
                 
+            reference_date = datetime.strptime(date, "%Y-%m-%d")
+            self.load_xml_data(reference_date=reference_date)
             room = self.parse_room_number(room)
             start_time_str = f"{date} {sh}:{sm}"
             end_time_str = f"{date} {eh}:{em}"
@@ -632,10 +895,39 @@ class ClassroomReservationSystem:
                 'end': end_dt
             }
 
-            if self.is_conflict(check_entry):
-                messagebox.showwarning("사용 불가", "해당 시간에 이미 예약이 존재합니다.", parent=dialog)
+            conflict_info = self.is_conflict(check_entry)
+            if conflict_info:
+                conflict_source = conflict_info['source']
+                conflict_name = conflict_info.get('name', '')
+                conflict_time = f"{conflict_info['start'].strftime('%m/%d %H:%M')}~{conflict_info['end'].strftime('%H:%M')}"
+                
+                msg_map = {
+                    '웹사이트': "🚨 이미 예약된 시간입니다!",
+                    '수업': "📖 정규 수업 시간과 중복됩니다!",
+                    '수동입력': "🖋️ 수동 입력된 예약이 있습니다!"
+                }
+                extra = f"• 충돌 과목: {conflict_name}" if conflict_name else ""
+                
+                messagebox.showwarning(
+                    title="사용 불가",
+                    message=(
+                    f"{msg_map.get(conflict_source, '')}\n\n"
+                    f"• 건물: {building}\n"
+                    f"• 강의실: {room}\n"
+                    f"{extra}",
+                    f"• 충돌 시간: {conflict_time}\n"
+                    ),
+                    parent=dialog
+                )
             else:
-                messagebox.showinfo("사용 가능", "해당 시간은 사용 가능합니다!", parent=dialog)
+                messagebox.showinfo(
+                    "사용 가능", 
+                    "✅ 해당 시간은 사용 가능합니다!\n\n"
+                    f"• 건물: {building}\n"
+                    f"• 강의실: {room}\n"
+                    f"• 신청 시간: {start_dt.strftime('%m/%d %H:%M')}~{end_dt.strftime('%H:%M')}",
+                    parent=dialog
+                )
 
         except ValueError as ve:
             messagebox.showerror("입력 오류", str(ve), parent=dialog)
@@ -694,15 +986,8 @@ if __name__ == "__main__":
     app = ClassroomReservationSystem(root)
     
     if sys.platform == 'win32':
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy()) 
-    # 이벤트 루프 초기화
-    #app.async_thread = threading.Thread(
-    #    target=app.start_async_loop, 
-    #    daemon=True
-    #)
-    #app.async_thread.start()
-    
-    # 종료 이벤트 핸들링
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
     def on_closing():
         root.destroy()
     
