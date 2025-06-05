@@ -93,17 +93,17 @@ class ClassroomReservationSystem:
 
         self.website_data = []
         self.manual_data = []
-        self.lecture_data = []  # ★ XML 강의 데이터 저장
+        self.lecture_data = []  #  XML 강의 데이터 저장
         self.buildings = self.get_building_list()
         self.building_dict = {name: code for code, name in self.buildings} if self.buildings else {}
-        self.building_code_map = self.create_building_code_map()  # ★ 건물 코드 매핑
+        self.building_code_map = self.create_building_code_map()  #  건물 코드 매핑
 
         self.setup_style()
         self.setup_ui()
         self.create_login_ui()
         self.login_frame.pack_forget()
-        self.xml_url = "https://raw.githubusercontent.com/Nyxthorn/work/main/data.xml"  # XML 데이터 URL ★추가
-        self.load_xml_data()  # ★ XML 데이터 로드 추가
+        self.xml_url = "https://raw.githubusercontent.com/Nyxthorn/work/main/data.xml"  # XML 데이터 URL 추가
+        self.load_xml_data()  #  XML 데이터 로드 추가
         
         if self.buildings:
             self.load_initial_data()
@@ -180,12 +180,12 @@ class ClassroomReservationSystem:
                         else:
                             expanded_times.append(time_part)
 
-                    # 강의실 분할 및 표준화
+                    
                     rooms = [r.strip() for r in raw_rooms.split(',') if r.strip()]
                     if not rooms:
                         continue
 
-                    # 시간 개수에 맞게 강의실 반복
+                    
                     if len(rooms) < len(expanded_times):
                         rooms *= len(expanded_times)
 
@@ -231,7 +231,7 @@ class ClassroomReservationSystem:
             if len(time_code) < 1:
                 return []
 
-            # 1. 요일 추출
+            #  요일 추출
             day_char = time_code[0]
             kor_to_eng = {'월':'M','화':'T','수':'W','목':'R','금':'F','토':'S','일':'U'}
             if day_char not in kor_to_eng:
@@ -240,14 +240,14 @@ class ClassroomReservationSystem:
             day_map = {'M':0, 'T':1, 'W':2, 'R':3, 'F':4, 'S':5, 'U':6}
             target_weekday = day_map[day_num]
 
-            # 2. 기준 날짜 처리
+            #  기준 날짜 처리
             base_date = reference_date or datetime.today()
             #if reference_date:
             #    base_date = reference_date
             #else:
             #    base_date = datetime.today()
 
-            # 3. 교시 추출
+            #  교시 추출
             period_str = time_code[1:]
             periods = []
             for part in period_str.split(','):
@@ -262,7 +262,7 @@ class ClassroomReservationSystem:
                 else:
                     periods.append(part)
     
-            # 4. 시간 계산 
+            #  시간 계산 
             time_ranges = []
             for day_offset in range(-days_ahead, days_ahead +1):
                 current_date = base_date + timedelta(days=day_offset)
