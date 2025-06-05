@@ -180,40 +180,38 @@ class ClassroomReservationSystem:
                         else:
                             expanded_times.append(time_part)
 
-                    # 강의실 분할
+                    # 강의실 분할 및 표준화
                     rooms = [r.strip() for r in raw_rooms.split(',') if r.strip()]
-                
-                    # 강의실 개수 조정 (1개면 반복, 여러 개면 순환)
-                    if len(rooms) == 0:
+                    if not rooms:
                         continue
-                    if len(rooms) < len(expanded_times):
-                        if len(rooms) == 1:
-                            rooms = rooms * len(expanded_times)
-                        else:
-                            rooms += [rooms[-1]] * (len(expanded_times) - len(rooms))
 
-                    for time_code, room in zip(expanded_times, rooms):
-                        # 건물-호실 분리 로직
-                        match = re.match(r"^([가-힣a-zA-Z]+?)\-?(\d+)$", room)
-                        if match:
-                            building_part, room_number = match.groups()
-                        else:
-                            building_part, room_number = room, ""
-                        
+                    # 시간 개수에 맞게 강의실 반복
+                    if len(rooms) < len(expanded_times):
+                        rooms *= len(expanded_times)
+
+                    for time_code, room_str in zip(expanded_times, rooms):
+                        alt_names = re.findall(r'\((.*?)\)', room_str)
+                        base_room = re.sub(r'\(.*?\)', '', room_str).strip()
+
+                        parts = base_room.split('-', 1)
+                        building_part = parts[0].strip()
+                        room_part = parts[1].strip() if len(parts) > 1 else building_part  # 강의실 생략 시 건물명 사용
+
                         building = self.building_code_map.get(building_part, building_part)
-                        
-                        # 시간 파싱
+
+                        all_room_names = [room_part] + [alt.strip() for alt in alt_names if alt.strip()]
+
                         time_ranges = self.parse_time_code(time_code, reference_date=reference_date)
                         for start, end in time_ranges:
-                            self.lecture_data.append({
-                                'building': building,
-                                'room': room_number,
-                                'start': start,
-                                'end': end,
-                                'source': '수업',
-                                'name': name
-                            })
-                        print(f"XML 강의 시간: {start} ~ {end}") # 추가
+                            for room_name in all_room_names:
+                                self.lecture_data.append({
+                                    'building': building,
+                                    'room': room_name,
+                                    'start': start,
+                                    'end': end,
+                                    'source': '수업',
+                                    'name': name
+                                })
 
                 except Exception as e:
                     print(f"🚫 강의 '{name}' 처리 실패: {str(e)}")
@@ -279,7 +277,7 @@ class ClassroomReservationSystem:
                         end_time = start_time + timedelta(minutes=50)
                     elif period.isalpha() and len(period) == 1:
                         idx = ord(period.upper()) - ord('A')
-                        start_min = 540 + 105 * idx  # 09:00 기준
+                        start_min = 540 + 90 * idx # 09:00 기준
                         hours, mins = divmod(start_min, 60)
                         start_time = current_date.replace(hour=hours, minute=mins)
                         end_time = start_time + timedelta(minutes=75)
@@ -599,11 +597,23 @@ class ClassroomReservationSystem:
             messagebox.showerror("오류", f"건물 목록 조회 실패: {str(e)}")
             return []
 
-    def parse_room_number(self, room_str):
-        #match = re.search(r'(\d+)(?!.*\d)', room_str)
-        #return match.group(1) if match else room_str
-        return re.sub(r'[^0-9]', '', room_str)
+    def parse_room_number(self, room_str, building=None):
+        if isinstance(room_str, list):  #  이미 리스트라면 문자열로 변환
+            room_str = ' '.join(str(x) for x in room_str)
+            
+        # 숫자 3자리 또는 4자리 추출
+        matches = re.findall(r'\d{3,4}', str(room_str))
+        parsed = []
 
+        for num in matches:
+            # 예: "1505"는 10층 넘지 않는 건물에서는 "505"로 정규화
+            if building and '산학협력관' not in building:
+                if len(num) == 4 and num.startswith('1'):
+                    num = num[1:]
+            parsed.append(num)
+
+        return parsed if parsed else [room_str.strip() or "미지정"]
+    
     def scrape_website_data(self, building_code):
         try:
             session = requests.Session()
@@ -675,7 +685,8 @@ class ClassroomReservationSystem:
         conflicts = set()
 
         for entry in self.website_data + self.manual_data:
-            key = (entry['building'], entry['room'])
+            room_key = tuple(entry['room']) if isinstance(entry['room'], list) else (entry['room'],)
+            key = (entry['building'], room_key)
             time_dict.setdefault(key, []).append(entry)
 
         for key, entries in time_dict.items():
@@ -700,31 +711,54 @@ class ClassroomReservationSystem:
                 entry['person'], entry['status']
             ), tags=tags)
 
+    def normalize_names(self, names):
+        # 리스트가 아니면 리스트로 변환
+        if isinstance(names, str):
+            names = [names]
+        elif isinstance(names, list):
+            # 리스트 안에 리스트가 있는 경우 평탄화
+            flat = []
+            for n in names:
+                if isinstance(n, list):
+                    flat.extend(n)
+                else:
+                    flat.append(n)
+            names = flat
+        else:
+            names = [str(names)]
+
+        # re.sub을 적용 (str로 변환한 후)
+        return [re.sub(r'\D', '', str(name)) for name in names if re.sub(r'\D', '', str(name))]
 
     def is_conflict(self, new_entry):
         """강화된 충돌 검사 로직"""
         # 건물명 정규화
         new_building = self.building_code_map.get(new_entry['building'], new_entry['building'])
-        new_room = self.parse_room_number(new_entry['room'])
-    
-        print(f"\n=== 충돌 검사 시작 ===")
-        print(f"신청 건물: {new_building}, 호실: {new_room}")
-        print(f"신청 시간: {new_entry['start']} ~ {new_entry['end']}")
+        new_room_names = self.normalize_names(self.parse_room_number(new_entry['room'], new_building))
 
         for entry in self.lecture_data + self.website_data + self.manual_data:
-            # 건물명 정규화
+            print(f"[DEBUG] entry['room'] 타입: {type(entry['room'])}, 값: {entry['room']}")
             entry_building = self.building_code_map.get(entry['building'], entry['building'])
-            entry_room = self.parse_room_number(entry['room'])
-        
-            # 건물 & 호실 비교
-            if entry_building != new_building or entry_room != new_room:
+            entry_room_names = self.normalize_names(self.parse_room_number(entry['room'], entry_building))
+
+            if entry_building != new_building:
                 continue
-            print(f"비교 건물: {entry_building} vs {new_building}")# 추가
-            print(f"비교 호실: {entry_room} vs {new_room}")# 추가
+            if not set(new_room_names) & set(entry_room_names):
+                continue
+            if not self.is_time_overlap(entry, new_entry):
+                continue
+
+            if not set(new_room_names) & set(entry_room_names):
+                continue
             # 시간 비교
             if self.is_time_overlap(entry, new_entry):
                 print(f"🚨 충돌 발견: {entry['source']} {entry['start']}~{entry['end']}")
-                return entry['source']
+                return {
+                    'source': entry['source'],
+                    'name': entry.get('name', ''),
+                    'start': entry['start'],
+                    'end': entry['end']
+                }
     
         print("✅ 충돌 없음")
         return False
@@ -863,7 +897,9 @@ class ClassroomReservationSystem:
 
     def check_availability(self, dialog, building, room, date, sh, sm, eh, em):
         try:
-            if not re.match(r'^\d+$', self.parse_room_number(room)):
+            parsed_room = self.parse_room_number(room)
+            room_str = parsed_room[0] if isinstance(parsed_room, list) and parsed_room else "미지정"
+            if not re.match(r'^\d+$', room_str):
                 raise ValueError("강의실 번호가 유효하지 않습니다")
 
             code = next((code for code, name in self.buildings if name == building), None)
@@ -872,36 +908,48 @@ class ClassroomReservationSystem:
                 
             reference_date = datetime.strptime(date, "%Y-%m-%d")
             self.load_xml_data(reference_date=reference_date)
-            room = self.parse_room_number(room)
+            self.website_data = self.scrape_website_data(code)
             start_time_str = f"{date} {sh}:{sm}"
             end_time_str = f"{date} {eh}:{em}"
-
             start_dt = self.parse_time(start_time_str)
             end_dt = self.parse_time(end_time_str)
+            
+            parsed_room = self.parse_room_number(room, building)
+            if isinstance(parsed_room, list):
+                parsed_room = parsed_room[0] if parsed_room else "미지정"
 
             if start_dt >= end_dt:
                 raise ValueError("종료 시간이 시작 시간보다 빠릅니다.")
 
             check_entry = {
                 'building': building,
-                'room': room,
+                'room': room_str,
                 'start': start_dt,
                 'end': end_dt
             }
 
-            conflict_source = self.is_conflict(check_entry)
-            if conflict_source:
+            conflict_info = self.is_conflict(check_entry)
+            if conflict_info:
+                conflict_source = conflict_info['source']
+                conflict_name = conflict_info.get('name', '')
+                conflict_time = f"{conflict_info['start'].strftime('%m/%d %H:%M')}~{conflict_info['end'].strftime('%H:%M')}"
+                
                 msg_map = {
                     '웹사이트': "🚨 이미 예약된 시간입니다!",
                     '수업': "📖 정규 수업 시간과 중복됩니다!",
                     '수동입력': "🖋️ 수동 입력된 예약이 있습니다!"
                 }
+                extra = f"• 충돌 과목: {conflict_name}" if conflict_name else ""
+                
                 messagebox.showwarning(
-                    "사용 불가", 
+                    title="사용 불가",
+                    message=(
                     f"{msg_map.get(conflict_source, '')}\n\n"
                     f"• 건물: {building}\n"
                     f"• 강의실: {room}\n"
-                    f"• 충돌 시간: {start_dt.strftime('%m/%d %H:%M')}~{end_dt.strftime('%H:%M')}",
+                    f"{extra}",
+                    f"• 충돌 시간: {conflict_time}\n"
+                    ),
                     parent=dialog
                 )
             else:
