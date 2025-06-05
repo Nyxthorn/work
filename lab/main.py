@@ -88,7 +88,7 @@ class ClassroomReservationSystem:
         self.async_thread = None
         self.stop_event = None  
 
-        self.current_version = "1.3.0"
+        self.current_version = "1.3.1"
         self.repo_url = "https://github.com/Nyxthorn/work/releases"
 
         self.website_data = []
