@@ -88,22 +88,22 @@ class ClassroomReservationSystem:
         self.async_thread = None
         self.stop_event = None  
 
-        self.current_version = "1.3.0"
+        self.current_version = "1.3.1"
         self.repo_url = "https://github.com/Nyxthorn/work/releases"
 
         self.website_data = []
         self.manual_data = []
-        self.lecture_data = []  # ★ XML 강의 데이터 저장
+        self.lecture_data = []  #  XML 강의 데이터 저장
         self.buildings = self.get_building_list()
         self.building_dict = {name: code for code, name in self.buildings} if self.buildings else {}
-        self.building_code_map = self.create_building_code_map()  # ★ 건물 코드 매핑
+        self.building_code_map = self.create_building_code_map()  #  건물 코드 매핑
 
         self.setup_style()
         self.setup_ui()
         self.create_login_ui()
         self.login_frame.pack_forget()
-        self.xml_url = "https://raw.githubusercontent.com/Nyxthorn/work/main/data.xml"  # XML 데이터 URL ★추가
-        self.load_xml_data()  # ★ XML 데이터 로드 추가
+        self.xml_url = "https://raw.githubusercontent.com/Nyxthorn/work/main/data.xml"  # XML 데이터 URL 추가
+        self.load_xml_data()  #  XML 데이터 로드 추가
         
         if self.buildings:
             self.load_initial_data()
@@ -212,7 +212,6 @@ class ClassroomReservationSystem:
                                     'source': '수업',
                                     'name': name
                                 })
-                        print(f"XML 강의 시간: {start} ~ {end}") # 추가
 
                 except Exception as e:
                     print(f"🚫 강의 '{name}' 처리 실패: {str(e)}")
@@ -598,11 +597,23 @@ class ClassroomReservationSystem:
             messagebox.showerror("오류", f"건물 목록 조회 실패: {str(e)}")
             return []
 
-    def parse_room_number(self, room_str):
-        # match = re.search(r'(\d+)(?!.*\d)', room_str)
-        # return match.group(1) if match else room_str
-        return re.sub(r'[^0-9]', '', room_str)
+    def parse_room_number(self, room_str, building=None):
+        if isinstance(room_str, list):  #  이미 리스트라면 문자열로 변환
+            room_str = ' '.join(str(x) for x in room_str)
+            
+        # 숫자 3자리 또는 4자리 추출
+        matches = re.findall(r'\d{3,4}', str(room_str))
+        parsed = []
 
+        for num in matches:
+            # 예: "1505"는 10층 넘지 않는 건물에서는 "505"로 정규화
+            if building and '산학협력관' not in building:
+                if len(num) == 4 and num.startswith('1'):
+                    num = num[1:]
+            parsed.append(num)
+
+        return parsed if parsed else [room_str.strip() or "미지정"]
+    
     def scrape_website_data(self, building_code):
         try:
             session = requests.Session()
@@ -674,7 +685,8 @@ class ClassroomReservationSystem:
         conflicts = set()
 
         for entry in self.website_data + self.manual_data:
-            key = (entry['building'], entry['room'])
+            room_key = tuple(entry['room']) if isinstance(entry['room'], list) else (entry['room'],)
+            key = (entry['building'], room_key)
             time_dict.setdefault(key, []).append(entry)
 
         for key, entries in time_dict.items():
@@ -699,25 +711,41 @@ class ClassroomReservationSystem:
                 entry['person'], entry['status']
             ), tags=tags)
 
+    def normalize_names(self, names):
+        # 리스트가 아니면 리스트로 변환
+        if isinstance(names, str):
+            names = [names]
+        elif isinstance(names, list):
+            # 리스트 안에 리스트가 있는 경우 평탄화
+            flat = []
+            for n in names:
+                if isinstance(n, list):
+                    flat.extend(n)
+                else:
+                    flat.append(n)
+            names = flat
+        else:
+            names = [str(names)]
 
-    def normalize_names(self, name):
-        # 괄호 내 이름까지 포함해 비교
-        names = [name.strip()]
-        matches = re.findall(r'\((.*?)\)', name)
-        names += [m.strip() for m in matches if m.strip()]
-        return [re.sub(r'[^0-9가-힣A-Za-z]', '', n) for n in names]
+        # re.sub을 적용 (str로 변환한 후)
+        return [re.sub(r'\D', '', str(name)) for name in names if re.sub(r'\D', '', str(name))]
 
     def is_conflict(self, new_entry):
         """강화된 충돌 검사 로직"""
         # 건물명 정규화
         new_building = self.building_code_map.get(new_entry['building'], new_entry['building'])
-        new_room_names = self.normalize_names(new_entry['room'])
+        new_room_names = self.normalize_names(self.parse_room_number(new_entry['room'], new_building))
 
         for entry in self.lecture_data + self.website_data + self.manual_data:
+            print(f"[DEBUG] entry['room'] 타입: {type(entry['room'])}, 값: {entry['room']}")
             entry_building = self.building_code_map.get(entry['building'], entry['building'])
-            entry_room_names = self.normalize_names(entry['room'])
+            entry_room_names = self.normalize_names(self.parse_room_number(entry['room'], entry_building))
 
             if entry_building != new_building:
+                continue
+            if not set(new_room_names) & set(entry_room_names):
+                continue
+            if not self.is_time_overlap(entry, new_entry):
                 continue
 
             if not set(new_room_names) & set(entry_room_names):
@@ -869,7 +897,9 @@ class ClassroomReservationSystem:
 
     def check_availability(self, dialog, building, room, date, sh, sm, eh, em):
         try:
-            if not re.match(r'^\d+$', self.parse_room_number(room)):
+            parsed_room = self.parse_room_number(room)
+            room_str = parsed_room[0] if isinstance(parsed_room, list) and parsed_room else "미지정"
+            if not re.match(r'^\d+$', room_str):
                 raise ValueError("강의실 번호가 유효하지 않습니다")
 
             code = next((code for code, name in self.buildings if name == building), None)
@@ -878,19 +908,22 @@ class ClassroomReservationSystem:
                 
             reference_date = datetime.strptime(date, "%Y-%m-%d")
             self.load_xml_data(reference_date=reference_date)
-            room = self.parse_room_number(room)
+            self.website_data = self.scrape_website_data(code)
             start_time_str = f"{date} {sh}:{sm}"
             end_time_str = f"{date} {eh}:{em}"
-
             start_dt = self.parse_time(start_time_str)
             end_dt = self.parse_time(end_time_str)
+            
+            parsed_room = self.parse_room_number(room, building)
+            if isinstance(parsed_room, list):
+                parsed_room = parsed_room[0] if parsed_room else "미지정"
 
             if start_dt >= end_dt:
                 raise ValueError("종료 시간이 시작 시간보다 빠릅니다.")
 
             check_entry = {
                 'building': building,
-                'room': room,
+                'room': room_str,
                 'start': start_dt,
                 'end': end_dt
             }
