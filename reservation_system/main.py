@@ -25,9 +25,7 @@ if sys.platform == 'win32':
 
 warnings.filterwarnings('ignore', category=requests.packages.urllib3.exceptions.InsecureRequestWarning)
 
-# =========================
 # 유틸 함수(정규화/네트워크)
-# =========================
 def normalize_room_number(room_str):
     """숫자만 추출해서 리스트로 반환"""
     if isinstance(room_str, list):
@@ -52,9 +50,7 @@ def safe_request(*args, **kwargs):
         messagebox.showerror("시스템 오류", f"알 수 없는 네트워크 오류: {e}")
     return None
 
-# ======================
 # 커스텀 라운드 버튼
-# ======================
 class RoundedButton(tk.Canvas):
     def __init__(self, parent, text, command, radius=20, bg='#ffd1dc', fg='#4a4a4a', **kwargs):
         super().__init__(parent, highlightthickness=0, **kwargs)
@@ -104,9 +100,7 @@ class RoundedButton(tk.Canvas):
     def _on_leave(self, event):
         self.draw_normal()
 
-# ==============================
 # 본 클래스
-# ==============================
 class ClassroomReservationSystem:
     def __init__(self, root):
         self.root = root
@@ -119,7 +113,7 @@ class ClassroomReservationSystem:
         self.async_thread = None
         self.stop_event = None
 
-        self.current_version = "1.3.1"
+        self.current_version = "1.3.2"
         self.repo_url = "https://github.com/Nyxthorn/work/releases"
 
         self.website_data = []
