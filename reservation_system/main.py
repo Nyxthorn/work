@@ -25,7 +25,9 @@ if sys.platform == 'win32':
 
 warnings.filterwarnings('ignore', category=requests.packages.urllib3.exceptions.InsecureRequestWarning)
 
+# =========================
 # 유틸 함수(정규화/네트워크)
+# =========================
 def normalize_room_number(room_str):
     """숫자만 추출해서 리스트로 반환"""
     if isinstance(room_str, list):
@@ -50,7 +52,9 @@ def safe_request(*args, **kwargs):
         messagebox.showerror("시스템 오류", f"알 수 없는 네트워크 오류: {e}")
     return None
 
+# ======================
 # 커스텀 라운드 버튼
+# ======================
 class RoundedButton(tk.Canvas):
     def __init__(self, parent, text, command, radius=20, bg='#ffd1dc', fg='#4a4a4a', **kwargs):
         super().__init__(parent, highlightthickness=0, **kwargs)
@@ -100,7 +104,9 @@ class RoundedButton(tk.Canvas):
     def _on_leave(self, event):
         self.draw_normal()
 
+# ==============================
 # 본 클래스
+# ==============================
 class ClassroomReservationSystem:
     def __init__(self, root):
         self.root = root
@@ -365,8 +371,8 @@ class ClassroomReservationSystem:
             self.building_combo.current(0)
             self.refresh_data()
 
-    def safe_gui_update(self, func, *args):
-        self.root.after(0, lambda: func(*args))
+    def safe_gui_update(self, func, *args, **kwargs):
+        self.root.after(0, lambda: func(*args, **kwargs))
 
     # ========= UI/디자인 ==========
     def setup_style(self):
@@ -498,7 +504,6 @@ class ClassroomReservationSystem:
                 'https://kutis1.kyungnam.ac.kr/ADFF/AE/AE0560M.aspx',
                 {'waitUntil': 'domcontentloaded', 'timeout': 30000}
             )
-            self.root.after(0, lambda: messagebox.showinfo("성공", "브라우저에서 신청을 진행해주세요"))
             return True
         except Exception as e:
             if page:
