@@ -18,14 +18,24 @@ def split_times(time_str):
             result.append(part)
     return result
 
-
 file_path = input("변환할 엑셀 파일 경로를 입력하세요 (예: MainView.xlsx): ").strip()
 if not file_path:
     print("파일 경로가 입력되지 않았습니다.")
     exit(1)
 
+
+wanted_cols = ['과목명', '강의시간', '강의실']
+
 df = pd.read_excel(file_path, engine="openpyxl")
-df = df[['과목명', '강의시간', '강의실']].copy()
+
+df = df[[col for col in wanted_cols if col in df.columns]].copy()
+
+
+missing = [col for col in wanted_cols if col not in df.columns]
+if missing:
+    print(f"엑셀 파일에 다음 열이 없습니다: {', '.join(missing)}")
+    exit(1)
+
 df.columns = ['Name', 'Time', 'Room']
 
 lecture_data = []
